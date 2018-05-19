@@ -1,656 +1,315 @@
 #include <bits/stdc++.h>
 #include "GL/freeglut.h"
 #include "GL/gl.h"
+#include <glm/glm.hpp>
 #include <unistd.h>
 #include <GL/glu.h>
 #include "../include/model.h"
-#include "../include/SOIL.h"
 
-SceneGraphNode *temp;
+#define MAX_RAY_DEPTH 5
 
 using namespace std;
 
-float start[3], peak[3], stop[3], interval, ys, vs;
-bool box = true;
+float intersectedDist = NOT_INTERSECTED;
+int numBounces = 8, caus = 0;
 
-void Model::setNormals() {
-	float a[3], b[3], c[3], length;
-	for(int i=0; i<faces.size(); i++) {
-		a[0] = faces[i]->vertices[1]->x - faces[i]->vertices[0]->x;
-		a[1] = faces[i]->vertices[1]->y - faces[i]->vertices[0]->y;
-		a[2] = faces[i]->vertices[1]->z - faces[i]->vertices[0]->z;
-		
-		b[0] = faces[i]->vertices[2]->x - faces[i]->vertices[0]->x;
-		b[1] = faces[i]->vertices[2]->y - faces[i]->vertices[0]->y;
-		b[2] = faces[i]->vertices[2]->z - faces[i]->vertices[0]->z;
-		
-		// Cross Product
-		c[0] = a[1] * b[2] - b[1] * a[2]; 
-		c[1] = a[2] * b[0] - b[2] * a[0];
-		c[2] = a[0] * b[1] - b[0] * a[1];
-		
-		// Normalization Factor
-		length = sqrt((c[0] * c[0]) + (c[1] * c[1]) + (c[2] * c[2]));
-		
-		faces[i]->normal[0] = c[0] / length;
-		faces[i]->normal[1] = c[1] / length;
-		faces[i]->normal[2] = c[2] / length;
-		
-	}
+inline bool odd(int x) { return x & 1; } 
+
+float dotProduct(Vec3 a, Vec3 b) {
+	return (b.x * a.x + b.y * a.y + b.z * a.z);
 }
 
-void Model::computeTexSphere() {
-	for(int i=0; i<faces.size(); i++) {
-		for(int j=0; j<faces[i]->vertices.size(); j++) {
-			faces[i]->vertices[j]->r = (atan2f(faces[i]->vertices[j]->z, faces[i]->vertices[j]->x)  + 3.14)/(2*3.14);
-			faces[i]->vertices[j]->s = (atan2f(faces[i]->vertices[j]->z, faces[i]->vertices[j]->y*sin(2*3.14*faces[i]->vertices[j]->r)))/(2*3.14);
-		}
-	}
+float mag(Vec3 a) {
+	return sqrt(a.x * a.x + a.y * a.y + a.z * a.z);
 }
 
-void Model::setDirection(GLfloat *pos) {	
+Vec3 multV(Vec3 a, float n) {
+	return Vec3(a.x * n, a.y * n, a.z * n);
 }
 
-
-Model::Model() {
-	size = 0;
-	scale = 1;
-	angle = 0;
-	speed = 1;
-	nflag = false;
-	tex = 0;
+Vec3 addV(Vec3 a, Vec3 b) {
+	return Vec3(a.x + b.x, a.y + b.y, a.z + b.z);
 }
 
-Model::Model(char *fname) {
-	size = 0;
-	scale = 1;
-	angle = 0;
-	speed = 1;
-	nflag = false;
-	tex = 0;
-	read(fname);
+Vec3 subV(Vec3 a, Vec3 b) {
+	return Vec3(a.x - b.x, a.y - b.y, a.z - b.z);
 }
 
-void Model::nextPosition(float *transm, float *rotsm, float* scle) {
-}	
-
-void Model::read(char *argv) {
-	vector<Vertex*> v;
-	float minx, maxx, miny, maxy, minz, maxz;
-	minx = miny = minz = 10000;
-	maxx = maxy = maxz = -10000;
-	FILE *file = fopen(argv,"r");
-	int noOfv, noOfFaces;
-	char buffer[100];
-	if(file) {
-		fgets(buffer, 100, file);
-		while(strncmp("element vertex", buffer, strlen("element vertex")) != 0) {
-			fgets(buffer, 100, file);
-		}
-		strcpy(buffer, buffer+strlen("element vertex"));
-		sscanf(buffer, "%d", &noOfv);
-					
-		while(strncmp("element face", buffer, strlen("element face")) != 0) {
-			fgets(buffer, 100, file);
-		}
-		strcpy(buffer, buffer+strlen("element face"));
-		sscanf(buffer, "%d", &noOfFaces);
-		
-		while(strncmp("end_header", buffer, strlen("end_header")) != 0  ) {
-			fgets(buffer, 100, file);			
-		}
-		
-		for(int i=0; i<noOfv; i++) {
-			fgets(buffer, 100, file);
-			float a, b, c;
-			sscanf(buffer, "%f %f %f", &a, &b, &c);
-			minx = min(minx, a);
-			miny = min(miny, b);
-			minz = min(minz, c);
-			maxx = max(maxx, a);
-			maxy = max(maxy, b);
-			maxz = max(maxz, c);
-			Vertex* newV;
-			if(strcmp(argv,"data/cobramkii.ply") == 0) {
-				float d, e, f;
-				nflag = true;
-				sscanf(buffer, "%f %f %f", &d, &e, &f);
-			}
-			newV = new Vertex(a,b,c);
-			v.push_back(newV);
-		}
-		if(size < maxx-minx)
-		    	size = maxx-minx;
-		if(size < maxy-miny)
-			size = maxy-miny;
-		if(size < maxz-minz)
-		    	size = maxz-minz;
-		scale = 2.0 / size;
-		for (int i=0; i<noOfv; i++) {
-		    	v[i]->x = scale * (v[i]->x - minx) - 1.0;
-		    	v[i]->y = scale * (v[i]->y - miny) - 1.0;
-			v[i]->z = scale * (v[i]->z - minz) - 1.0;
-		}
-		minx = miny = minz = 10000;
-		maxx = maxy = maxz = -10000;
-		for (int i=0; i<noOfv; i++) {
-		    	minx = min(minx, v[i]->x);
-		    	maxx = max(maxx, v[i]->x);
-		    	miny = min(miny, v[i]->y);
-		    	maxy = max(maxy, v[i]->y);
-		    	minz = min(minz, v[i]->z);
-			maxz = max(maxz, v[i]->z);
-		}
-		left = minx; right = maxx;
-		top = maxy; bottom = miny;
-		near = minz; far = maxz;
-		for(int i=0; i<noOfFaces; i++) {
-			int listSize;
-			fscanf(file, "%d", &listSize);
-			Face* newf = new Face();
-			for(int j=0; j<listSize; j++) {
-				int a;
-				fscanf(file, "%d", &a);
-				newf->vertices.push_back(v[a]);
-			}
-			faces.push_back(newf);
-		}
-		fclose(file);
-		mx = -(maxx+minx)/2;
-		my = -(maxy+miny)/2;
-		mx = -(maxz+minz)/2;
-		
-	}
-	else {
-		printf("File cannot be opened\n");
-	}
+Vec3 mulColor(const Vec3 rgb, const Vec3 color) {
+	return Vec3(color.x * rgb.x, color.y * rgb.y, color.z * rgb.z);
 }
 
-void Model::readTexture(char* texname) {
-	glGenTextures(1, &tex);
-	glBindTexture(GL_TEXTURE_2D, tex);
-	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
-	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
-	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
-	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-	image = SOIL_load_image(texname, &width, &height, 0, SOIL_LOAD_RGB);
-	glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB, width, height, 0, GL_RGB, GL_UNSIGNED_BYTE, image);
-   	SOIL_free_image_data(image);
+float mix(const float &a, const float &b, const float &mix) {
+    return b * mix + a * (1 - mix);
 }
 
-void Model::drawBox() {
-	glPushMatrix();
-		glColor3f(.75, .75, 0.0);
-		glBegin( GL_LINES);
-		float minx, maxx, miny, maxy, minz, maxz;
-		minx = left;
-		maxx = right;
-		miny = bottom;
-		minz = near;
-		maxy = top;
-		maxz = far;
-	
-		glVertex3f(minx, miny, minz);			
-		glVertex3f(maxx, miny, minz);				
-		glVertex3f(minx, maxy, minz);			
-		glVertex3f(maxx, maxy, minz);			
-		glVertex3f(minx, miny, minz);			
-		glVertex3f(minx, maxy, minz);			
-		glVertex3f(maxx, miny, minz);			
-		glVertex3f(maxx, maxy, minz);			
-		
-		glVertex3f(minx, miny, maxz);			
-		glVertex3f(maxx, miny, maxz);				
-		glVertex3f(minx, maxy, maxz);			
-		glVertex3f(maxx, maxy, maxz);			
-		glVertex3f(minx, miny, maxz);			
-		glVertex3f(minx, maxy, maxz);			
-		glVertex3f(maxx, miny, maxz);			
-		glVertex3f(maxx, maxy, maxz);			
-		
-		glVertex3f(minx, miny, minz);			
-		glVertex3f(minx, miny, maxz);			
-		glVertex3f(minx, maxy, minz);			
-		glVertex3f(minx, maxy, maxz);			
-
-		glVertex3f(maxx, miny, minz);			
-		glVertex3f(maxx, miny, maxz);				
-		glVertex3f(maxx, maxy, minz);			
-		glVertex3f(maxx, maxy, maxz); 
-		
-		glEnd();
-		
-	glPopMatrix();
-	glutPostRedisplay();
+Scene::Scene() {
+	X = Y = 0;
+	Z = 0.0;
+	pCol = 0; pRow = 0; pIteration = 1; res = 2;
+	map = new PhotonMap(mP);
+	globalMap = new PhotonMap(mP);
+	eye[0] = eye[1] = eye[2] = 0;
+	viewMap = true; empty = true;
 }
 
-void Model::setTexture() {
-	glTexEnvf(GL_TEXTURE_ENV, GL_TEXTURE_ENV_MODE, GL_MODULATE);
-	glBindTexture(GL_TEXTURE_2D, tex);
+void Scene::drawScene() {
+	map->display();
+	globalMap->display();
 }
 
-void Model::render() {
-	for(int n=0; n<faces.size(); n++) {	
-		glBegin(GL_POLYGON);		
-		glColor3f(.75, .75, 1);
-		for(int i=0; i<faces[n]->vertices.size(); i++) {	
-			glNormal3f(faces[n]->normal[0], faces[n]->normal[1], faces[n]->normal[2]);
-			glTexCoord2f(faces[n]->vertices[i]->r, faces[n]->vertices[i]->s);		
-			glVertex3f(faces[n]->vertices[i]->x, faces[n]->vertices[i]->y, faces[n]->vertices[i]->z); 
-		}
-		glEnd();
-	}
-}
-
-void Model::print() {
-	for(int n=0; n<faces.size(); n++) {	
-		for(int i=0; i<faces[n]->vertices.size(); i++) {	
-			cout<<faces[n]->vertices[i]->x<<" "<<faces[n]->vertices[i]->y<<" "<<faces[n]->vertices[i]->z<<endl;
-		}
-	}
-}
-
-Light::Light() : Model() {
-	GLfloat dif[] = {1.0, 1.0, 1.0, 1.0};
-	GLfloat spec[] = {1.0, 1.0, 1.0, 1.0};
-	GLfloat position[] = {0, 0, 2, 1};
-	GLfloat direction[] = {0, 0, 0};
-	glLightfv(GL_LIGHT4, GL_DIFFUSE, dif);
-	glLightfv(GL_LIGHT4, GL_SPECULAR, spec);
-	glLightf(GL_LIGHT4,GL_SPOT_CUTOFF, 50);
-	glLightf(GL_LIGHT4,GL_SPOT_EXPONENT, 0);
-	glLightfv (GL_LIGHT4, GL_POSITION, position);
-	glLightfv (GL_LIGHT4, GL_SPOT_DIRECTION, direction);
-	glEnable(GL_LIGHT4);
-}
-
-void Light::render() {
-}
-
-void Light::setDirection(GLfloat *pos) {
-	cout<<"Light: "<<pos[0]<<" "<<pos[1]<<" "<<pos[2]<<" "<<std::endl;
-	GLfloat position[] = {0, 0, 2, 1};
-	float no = sqrt(pos[0]*pos[0] + pos[1]*pos[1]+pos[2]*pos[2]);
-	pos[0] /= no; pos[1] /= no; pos[2] /= no;
-	glLightfv (GL_LIGHT4, GL_POSITION, position);
-	glLightfv (GL_LIGHT4, GL_SPOT_DIRECTION, pos);
-}
-
-void Light::nextPosition(float *transm, float *rotsm, float* scle) { 
-}
-
-Sun::Sun(char *fname) : Model(fname) {
-	time = 0; angle = 0;
-	strcpy(text, "data/sun.jpg");
-}
-
-void Sun::render() {
-	Model::render();
-}
-
-void Sun::nextPosition(float *transm, float *rotsm, float* scle) {
-	float cosAngle, sinAngle;
-	angle += speed;
-	if(angle > 360.0) angle = 0.0;
-	rotsm[1] = angle;
-	time++; 
-}
-
-Planet::Planet(char *fname) : Model(fname) {
-	time = 0; angle = 0;
-	speed = 1;
-	strcpy(text, "data/earth.jpg");
-}
-
-void Planet::render() {
-	Model::render();
-}
-
-void Planet::nextPosition(float *transm, float *rotsm, float* scle){
-	float cosAngle, sinAngle;
-	angle += speed;
-	if(angle > 360.0) angle = 0.0;
-	cosAngle = cos(angle * 3.1416 / 180.0);
-	sinAngle = sin(angle * 3.1416 / 180.0);
-	rotsm[1] = angle;
-	transm[0] = 3.0*sinAngle;
-	transm[1] = 3.0*cosAngle;
-	time++; 
-}
-
-Moon::Moon(char *fname) : Model(fname) {
-	time = 0;
-	strcpy(text, "data/moon.jpeg");
-}
-
-void Moon::render() {
-	Model::render();
-}
-
-void Moon::nextPosition(float *transm, float *rotsm, float* scle) {
-	float cosAngle, sinAngle;
-	angle += speed;
-	if(angle > 360.0) angle = 0.0;
-	cosAngle = cos(angle * 3.1416 / 180.0);
-	sinAngle = sin(angle * 3.1416 / 180.0);
-	rotsm[1] = -angle;
-	transm[0] = 3.5*sinAngle;
-	transm[1] = 3.5*cosAngle;
-	time++; 
-}
-
-Spaceship::Spaceship(char *fname) : Model(fname) {
-	time = -1;
-	strcpy(text, "data/m.jpeg");
-}
-
-void Spaceship::render() {
-	Model::render();
-}
-
-void Spaceship::nextPosition(float *transm, float *rotsm, float* scle) {
-	if(time!=-1) {
-		float x, y;
-		if(start[0]<stop[0]) 
-			x = transm[0] + interval;
-		else x = transm[0] - interval;
-		y = ys + vs * (float)time - (.5 * .2 * (float)time * (float)time);
-		transm[0] = x;
-		transm[1] = y;
-		rotsm[1] = angle;
-	}
-}
-
-SceneGraphNode::SceneGraphNode(Model* o) {
-	object = o;
-	transMatrix[0] = 0;
-	transMatrix[1] = 0;
-	transMatrix[2] = 0;
-	rotMatrix[0] = 0;
-	rotMatrix[1] = 0;
-	rotMatrix[2] = 0;
-	scale = 1;
-}  
-
-SceneGraphNode::SceneGraphNode(Model* o, float* mat) {
-	object = o;
-	transMatrix[0] = mat[0];
-	transMatrix[1] = mat[1];
-	transMatrix[2] = mat[2];
-	rotMatrix[0] = mat[3];
-	rotMatrix[1] = mat[4];
-	rotMatrix[2] = mat[5];
-	scale = mat[6];
-}
-
-void SceneGraphNode::addTexture(char *tex){
-	object->readTexture(tex);
-}
-
-void SceneGraphNode::appendModelNode(SceneGraphNode* sm) {
-	edges.push_back(sm);
-}
-
-void SceneGraphNode::drawModel() {
-	if (box)
-		object->drawBox();
-	glEnable(GL_TEXTURE_2D);
-	object->setTexture();
-	object->render();
-	glDisable(GL_TEXTURE_2D);
-}
-
-void SceneGraphNode::setTransitions(){
-	glTranslatef(transMatrix[0], transMatrix[1], transMatrix[2]);
-	glRotatef(rotMatrix[0], 1, 0, 0);
-	glRotatef(rotMatrix[1], 0, 1, 0);
-	glRotatef(rotMatrix[2], 0, 0, 1);
-	glScalef(scale, scale, scale);
-}
-
-void SceneGraphNode::drawNodeList() {
-	glPushMatrix();
-	setTransitions();
-	drawModel();
-	int i=0;
-	for (i=0; i<edges.size(); i++) 
-		edges[i]->drawNodeList();
-	glPopMatrix();
-	object->nextPosition(transMatrix, rotMatrix, &scale);
-}
-
-SceneGraphNode* SceneGraphNode::getNode(int i) {
-	return edges[i];
-}
-
-void SceneGraphNode::getPosition(GLfloat *pos) {
-	pos[0] = transMatrix[0];
-	pos[1] = transMatrix[1];
-	pos[2] = transMatrix[2];
-}
-
-void SceneGraph::drawSkyRight(GLuint* tex) {
-	glEnable(GL_TEXTURE_2D);
-	glTexEnvf(GL_TEXTURE_ENV, GL_TEXTURE_ENV_MODE, GL_MODULATE);
-	glBindTexture(GL_TEXTURE_2D, tex[0]);
-	glColor3f(1,1,1);
-	glBegin(GL_QUADS);
-	glNormal3f(-1.0, 0.0f, 0.0f);
-	glTexCoord2f(0.0f, 0.0f);
-	glVertex3f(100.0f, 100.0f, -11.0f);
-	glTexCoord2f(10.0f, 0.0f);
-	glVertex3f(100.0f, 100.0f, 11.0f);
-	glTexCoord2f(10.0f, 10.0f);
-	glVertex3f(100.0f, -100.0f, 11.0f);
-	glTexCoord2f(0.0f, 10.0f);
-	glVertex3f(100.0f, -100.0f, -11.0f);
-	glEnd();
-	glDisable(GL_TEXTURE_2D);
-}
-
-void SceneGraph::drawSkyLeft(GLuint *tex) {
-	glEnable(GL_TEXTURE_2D);
-	glTexEnvf(GL_TEXTURE_ENV, GL_TEXTURE_ENV_MODE, GL_MODULATE);
-	glBindTexture(GL_TEXTURE_2D, tex[0]);
-	glColor3f(1,1,1);
-	glBegin(GL_QUADS);
-	glNormal3f(1.0, 0.0f, 0.0f);
-	glTexCoord2f(0.0f, 0.0f);
-	glVertex3f(-100.0f, 100.0f, -11.0f);
-	glTexCoord2f(10.0f, 0.0f);
-	glVertex3f(-100.0f, 100.0f, 11.0f);
-	glTexCoord2f(10.0f, 10.0f);
-	glVertex3f(-100.0f, -100.0f, 11.0f);
-	glTexCoord2f(0.0f, 10.0f);
-	glVertex3f(-100.0f, -100.0f, -11.0f);
-	glEnd();
-	glDisable(GL_TEXTURE_2D);
-}
-
-void SceneGraph::drawSkyBack(GLuint* tex) {
-	glEnable(GL_LIGHTING);
-	glEnable(GL_TEXTURE_2D);
-	glTexEnvf(GL_TEXTURE_ENV, GL_TEXTURE_ENV_MODE, GL_MODULATE);
-	glBindTexture(GL_TEXTURE_2D, tex[0]);
-	glColor3f(1,1,1);
-	glBegin(GL_QUADS);
-	glNormal3f(0.0, 0.0f, 1.0f);
-	glTexCoord2f(0.0f, 0.0f);
-	glVertex3f(100.0f, 100.0f, -11.0f);
-	glTexCoord2f(10.0f, 0.0f);
-	glVertex3f(-100.0f, 100.0f, -11.0f);
-	glTexCoord2f(10.0f, 10.0f);
-	glVertex3f(-100.0f, -100.0f, -11.0f);
-	glTexCoord2f(0.0f, 10.0f);
-	glVertex3f(100.0f, -100.0f, -11.0f);
-	glEnd();
-	glDisable(GL_TEXTURE_2D);
-}
-
-void SceneGraph::drawScene() {
-	float pos[3];
-	if(changed == true) {
-		updateScene();
-		temp->getPosition(&pos[0]);
-	}
-	else {
-		if(oldIndex == 0) 
-			pos[0] = pos[1] = pos[2] = 0;
-		if(oldIndex == 1) 
-			graph[1]->getPosition(&pos[0]);
-		if(oldIndex == 2) 
-			graph[1]->edges[0]->getPosition(&pos[0]);
-	}	
-	graph[2]->object->setDirection(&pos[0]);
-	box = bounding;
-	for(int i=0; i<graph.size(); i++) 
-		graph[i]->drawNodeList();
+void Scene::close() {
+	free(map->photons);
+	free(globalMap->photons);
 }
 
 float distance(float x1, float x2, float y1, float y2, float z1, float z2) {
 	return sqrt(pow(x2-x1, 2) + pow(y2-y1, 2) + pow(z2-z1, 2));
 }
 
-void SceneGraph::updateScene() {
-	if(time == 0) {
-		//starting position
-		if(oldIndex == 0) {
-			temp = graph[0]->edges.back();
-			graph[0]->edges.pop_back();
-			start[0] = graph[0]->transMatrix[0];
-			start[1] = graph[0]->transMatrix[1];
-			start[2] = graph[0]->transMatrix[2];
-		}
-		else if(oldIndex == 1) {
-			temp = graph[1]->edges.back();
-			graph[1]->edges.pop_back();
-			start[0] = graph[1]->transMatrix[0];
-			start[1] = graph[1]->transMatrix[1];
-			start[2] = graph[1]->transMatrix[2];
-		}
-		else {
-			temp = graph[1]->edges[0]->edges.back();
-			graph[1]->edges[0]->edges.pop_back();
-			start[0] = graph[0]->edges[0]->transMatrix[0];
-			start[1] = graph[0]->edges[0]->transMatrix[1];
-			start[2] = graph[0]->edges[0]->transMatrix[2];
-		}
-		
-		//final position
-		if(newIndex == 0) {
-			stop[0] = graph[0]->transMatrix[0];
-			stop[1] = graph[0]->transMatrix[1];
-			stop[2] = graph[0]->transMatrix[2];
-		}
-		else if(newIndex == 1) {
-			float cosAngle, sinAngle;
-			float ang = (graph[1]->object->angle+(20*graph[1]->object->speed));
-			if(ang > 360) ang = ang - 360;
-			cosAngle = cos(ang * 3.1416 / 180.0);
-			sinAngle = sin(ang * 3.1416 / 180.0);
-			stop[0] = 3.0*sinAngle;
-			stop[1] = 3.0*cosAngle;
-			stop[2] = graph[1]->transMatrix[2];
-		}
-		else {
-			float cosAngle, sinAngle;
-			float ang = (graph[1]->edges[0]->object->angle+(20*graph[1]->edges[0]->object->speed));
-			if(ang > 360) ang = ang - 360;
-			cosAngle = cos(ang * 3.1416 / 180.0);
-			sinAngle = sin(ang * 3.1416 / 180.0);
-			stop[0] = 3.5*sinAngle;
-			stop[1] = 3.5*cosAngle;
-			stop[2] = graph[1]->edges[0]->transMatrix[2];
-		}
-		temp->transMatrix[0] = start[0];
-		temp->transMatrix[1] = start[1]+2;
-		temp->object->time = 0;
-		ys = start[1];
-		temp->object->dist = distance(stop[0], start[0], stop[1], start[1], stop[2], start[2]);
-		interval = abs(start[0] - stop[0])/20;
-		vs = (stop[1] - start[1] + 40) / 20;
-		temp->object->angle = 0;
-		addModel(temp);	
-			
-	}
-	else if(time == 20) {
-		temp->transMatrix[0] = 0; 
-		temp->transMatrix[1] = 2; 
-		temp->transMatrix[2] = -.4; 
-		temp->scale = 1;
-		graph.pop_back();		
-		if(newIndex == 0) {
-			graph[0]->appendModelNode(temp);
-			graph[0]->edges[0]->addTexture("data/sun.jpg");
-		}
-		else if(newIndex == 1) {
-			graph[1]->appendModelNode(temp);
-			graph[1]->edges[1]->addTexture("data/earth.jpg");
-		}
-		else {
-			graph[1]->edges[0]->appendModelNode(temp);
-			graph[1]->edges[0]->edges[0]->addTexture("data/moon.jpeg");
-		}	
-		oldIndex = newIndex;
-		changed = false;
-		temp->object->time = -2;
-	}
-	time++;
-	temp->object->time++;
+
+float Spheres::sIntersect(Vec3 origin, Vec3 direction) {
+  	/*
+   	* calculating sphere center translated into coordinate frame of ray origin (C - O)
+   	*/
+  	Vec3 sc(center.x - origin.x, center.y - origin.y, center.z - origin.z);
+  	float A = dotProduct(direction, direction);
+  	float B = -2.0 * dotProduct(sc, direction);
+  	float C = dotProduct(sc, sc) - radius * radius;
+  	float D = B * B - 4 * A * C;
+
+  	/*
+  	 * if mag of sc is less than r reject - origin is inside
+  	 */
+  	if(C < 0)
+  		return NOT_INTERSECTED;
+
+  	if (D > 0.0) {
+  		// Commented hack works instead of checking for C above
+    	//float sign = (C < -0.00001) ? 1 : -1;
+    	//return (-B + sign * sqrt(D)) / (2 * A);
+    	return (-B - sqrt(D)) / (2 * A);
+
+  	}
+  	return NOT_INTERSECTED;
 }
 
-void SceneGraph::init() {
-	char text[30];
-	strcpy(text, "data/sun.jpg");
-	float geomProps[7] = {0, 0, 0, 0, 0, 0, 1.1};
-	Sun *sun = new Sun("data/sphere.ply"); 
-	sun->computeTexSphere();
-	sun->setNormals();
-	SceneGraphNode *a = new SceneGraphNode(sun, &geomProps[0]);
-	a->addTexture(text);
-	//sun->print();
-	
-	geomProps[0] = -3; geomProps[1] = 0; geomProps[2] = 0; geomProps[6] = .6;
-	strcpy(text, "data/earth.jpg");
-	Planet *planet = new Planet("data/sphere.ply");
-	planet->computeTexSphere();
-	planet->setNormals();
-	SceneGraphNode *b = new SceneGraphNode(planet, &geomProps[0]);
-	b->addTexture(text);
-	
-	geomProps[0] = -3.5; geomProps[1] = 0; geomProps[2] = 0; geomProps[6] = .3;
-	strcpy(text, "data/moon.jpeg");
-	Moon *moon = new Moon("data/sphere.ply");
-	moon->computeTexSphere();
-	moon->setNormals();
-	SceneGraphNode *c = new SceneGraphNode(moon, &geomProps[0]);
-	c->addTexture(text);
-	
-	b->appendModelNode(c);
-	
-	geomProps[0] = 0; geomProps[1] = 2; geomProps[2] = -.4; geomProps[3]=-90; geomProps[6] = 1;
-	strcpy(text, "data/sun.jpg");
-	Spaceship *ship = new Spaceship("data/cobramkii.ply");
-	ship->computeTexSphere();
-	ship->setNormals();
-	SceneGraphNode *d = new SceneGraphNode(ship, &geomProps[0]);
-	d->addTexture(text);
-	
-	temp = (SceneGraphNode*)ship;
-	
-	a->appendModelNode(d);
-	
-	Light *light = new Light();
-	SceneGraphNode *e = new SceneGraphNode(light);
-
-	time = 0;
-	addModel(a);
-	addModel(b);
-	addModel(e);
+Vec3 Spheres::sNormal(Vec3 iPoint) {
+  	Vec3 normal(iPoint.x - center.x, iPoint.y - center.y, iPoint.z - center.z);
+  	normal.normalize();
+  	return normal;
 }
 
-void SceneGraph::addModel(SceneGraphNode* sg) {
-	graph.push_back(sg);
+/* 
+ * If ray is parallel to plane then value along plane axis must be zero
+ * If not parallel then intersection
+ * Solve Linear Equation (rx = p - o)
+ */
+float Planes::pIntersect(Vec3 origin, Vec3 direction) {
+  	if(axis == 0) {
+  	 	if(direction.x != 0.0)                         
+    		return  (distanceFromO - origin.x) / direction.x; 
+  	}
+  	else if(axis == 1) {
+  		if(direction.y != 0.0)
+  			return  (distanceFromO - origin.y) / direction.y;
+  	}
+  	else if(axis == 2) {
+  		if(direction.z != 0.0)
+  			return  (distanceFromO - origin.z) / direction.z;
+  	}
+  	return NOT_INTERSECTED;
+}
+
+Vec3 Planes::pNormal(Vec3 iPoint, PhotonRay ray) {
+	int a = axis;
+  	Vec3 normal(0, 0, 0);
+  	if(a == 0)
+  		normal.x = ray.origin.x - distanceFromO;
+  	if(a == 1)
+  		normal.y = ray.origin.y - distanceFromO; 
+  	if(a == 2)
+  		normal.z = ray.origin.z - distanceFromO; 
+  	normal.normalize();
+  	return normal;
+}
+
+void PhotonRay::randDir(float s) {
+	float temp[3];
+	for(int i = 0; i < 3; i++) 
+		temp[i] = (float)rand() * 2 * s / RAND_MAX - s;
+	direction.x = temp[0];
+	direction.y = temp[1];
+	direction.z = temp[2];
+	direction.normalize();
+}
+
+void PhotonRay::specularReflect(Vec3 iPoint, Vec3 N) {
+	float factor = 2 * dotProduct(direction, N);
+	Vec3 ans(direction.x - N.x * factor,
+			   direction.y - N.y * factor,
+			   direction.z - N.z * factor);
+  	ans.normalize();
+  	direction = ans;
+  	origin = iPoint;
+}
+
+void PhotonRay::refract(Vec3 iPoint, Vec3 N, float &ref) {
+	float n1 = 1;
+	// Refractive index of the second sphere, 1.5 - glass
+  	float n2 = 1.8; 
+  	float cosI  = dotProduct(direction, N);
+
+  	if(cosI > 0) {
+    	// From inside to outside : swap n1 and n2
+    	float tmp = n1;
+    	n1 = n2;
+    	n2 = tmp;
+  	}	
+
+  	float n  = n1 / n2;
+  	float sinT = n * n * (1.0 - cosI * cosI);
+  	float cosT = sqrt(1.0 - sinT);
+
+	Vec3 ans = addV(multV(direction, n), multV(N, n * cosI - cosT));
+	ans.normalize();
+  	origin = iPoint;
+ 	direction = ans;
+	 
+}
+
+void PhotonRay::pureDiffuse(Vec3 iPoint, Vec3 normal) {
+	Vec3 intersect(subV(origin, iPoint));
+	intersect.normalize();
+	PhotonRay newDiffuseRef(iPoint);
+	newDiffuseRef.randDir(1.0);
+	origin = iPoint;
+	direction = newDiffuseRef.direction;
+}
+
+ObjectIntersection* PhotonRay::tracePhotonRay(vector<Spheres*> spheres, vector<Planes*> planes) {
+	ObjectIntersection *obj = new ObjectIntersection();
+	for(int i = 0; i < spheres.size(); i++) {
+		float d = spheres[i]->sIntersect(origin, direction);
+		/* Finding closest object
+		 */
+		if(d < obj->dist and d > 1.0e-5) {						
+			obj->dist = d;
+			obj->index = i;
+			obj->type = 0;
+		}
+	}
+	for(int i = 0; i < planes.size(); i++) {
+		float d = planes[i]->pIntersect(origin, direction);
+		if(d < obj->dist and d > 1.0e-5) {
+			obj->dist = d;
+			obj->index = i;
+			obj->type = 1;
+		}
+	}
+	return obj;
+}
+
+void Scene::castPhotons() {
+	srand(0);
+	float photonPower = 1;
+	for (int i = 0; i < light->numPhotons; i++) {
+		int bounces = 1, spec = 0;
+		Vec3 rgb(1, 1, 1);
+		Vec3 col(1, 1, 1);
+		/* 
+		 * Photon ray's origin is set to light position pos
+		 */
+		PhotonRay ray(light->pos);
+		/* 
+		 * Randomize ray direction
+		 */
+		ray.randDir(1.0);
+		/* Photon is outside the room
+		 */
+		if(fabs(ray.origin.x) > 1.5 || fabs(ray.origin.y) > 1.5) {
+			continue;
+		}
+
+		float refractive = 1.0;
+		bool diffuse  = false;
+		Vec3 normal;
+		ObjectIntersection *obj = ray.tracePhotonRay(spheres, planes);
+		while(obj->index != -1 and bounces <= numBounces) {
+	      	Vec3 iPoint(ray.origin.x + ray.direction.x * obj->dist,
+	      			   ray.origin.y + ray.direction.y * obj->dist,
+	      			   ray.origin.z + ray.direction.z * obj->dist);
+
+	      	if(iPoint.z > 0 || iPoint.z < -5 || fabs(iPoint.y) > 1.5 || fabs(iPoint.x) > 1.5 ) break; // Intersect planes outside the box
+	      	int ind = obj->index;
+
+	      	if(obj->type == 1) {
+	      		normal = planes[ind]->pNormal(iPoint, ray);
+	      		float cosTheta = abs(dotProduct(normal, iPoint) / (mag(iPoint) * mag(normal)));
+	      		col = mulColor(rgb, planes[ind]->color);
+	      		// Scaling power by number of bounces, uncomment costTheta for Lambertian reflection
+	      		rgb = multV(col, (1.0 / sqrt((float)bounces) /** cosTheta*/));
+
+	      		Photon *p = new Photon(iPoint, ray.direction, 
+	      			Vec3(rgb.x * photonPower, rgb.y * photonPower, rgb.z * photonPower));
+	      		if(spec > 0 and diffuse == false) {
+	      			map->store(p);
+	      			diffuse = true;
+	      		}
+	      		else
+	      			globalMap->store(p);
+
+	      		ray.pureDiffuse(iPoint, normal);
+	      	}
+
+	      	else if(obj->type == 0) {
+	      		spec++;
+	      		normal = spheres[ind]->sNormal(iPoint);
+	      		col = mulColor(rgb, spheres[ind]->color);
+	      		rgb = multV(col, (1.0 / sqrt((float)bounces)));
+	      		Photon *p = new Photon(iPoint, ray.direction, Vec3(rgb.x * photonPower, rgb.y * photonPower, rgb.z * photonPower));
+	      		globalMap->store(p);
+
+	      		if(spheres[ind]->opticalProp == 1) 
+	      			ray.specularReflect(iPoint, normal);
+	      		else if(spheres[ind]->opticalProp == 2) {
+	      			ray.refract(iPoint, normal, refractive);
+	      		}
+
+	      	}
+	      	obj = ray.tracePhotonRay(spheres, planes);
+	      	bounces++;
+
+	    } 	     
+    }
+    cout<<"Caustic map "<<map->storedPhotons<<endl;
+    cout<<"Global map "<<globalMap->storedPhotons<<endl;
+    map->balance();
+    globalMap->balance();
+}
+
+void Scene::init() {
+
+	Spheres* sOne = new Spheres(-1.0, -1.0, -3.0, 0.5, SPECULAR);
+	Spheres* sTwo = new Spheres(.6, -1.2, -2.5, 0.3, REFRACT);
+	Spheres* sThree = new Spheres(-.2, -1.3, -2.0, 0.2, REFRACT);
+	Planes* left = new Planes(xAxis, 1.5, .75, .25, .25);
+	Planes* right = new Planes(xAxis, -1.5, .25, .25, .75);
+	Planes* top = new Planes(yAxis, 1.5, .75, .75, .75);
+	Planes* bottom = new Planes(yAxis, -1.5, .75, .75, .75);
+	Planes* back = new Planes(zAxis, -5.0, .75, .75, .75);
+
+	spheres.push_back(sOne); spheres.push_back(sTwo); spheres.push_back(sThree);
+
+	planes.push_back(left); planes.push_back(right);
+	planes.push_back(top); planes.push_back(bottom);
+	planes.push_back(back);
+
+	Light *l = new Light(Vec3(0, 1.2, -3.), 10000);
+	light = l;
+	light->color[0] = light->color[1] = light->color[2] = 1.0;
+	
+	castPhotons();
 }
 
 void multMatrix(float *e, float *rot) {
@@ -667,51 +326,11 @@ void multMatrix(float *e, float *rot) {
 	}
 }
 
-void SceneGraph::setCamera(float *rotmat, int changeCam) {	
-	if(changeCam == 0) {
-		eye[0] = 0 + X; 
-		eye[1] = 0+ Y;
-		eye[2] = 8.0 + Z;
-		eye[3] = 1;
-		multMatrix(&eye[0], rotmat);
-		gluLookAt(eye[0], eye[1], eye[2], X, Y, Z, 0, 1, 0);
-	}
-	
-	if (changeCam == 1) {
-		graph[1]->getPosition(&eye[0]);
-		eye[2] -= 1;
-		eye[3] = 1;
-		gluLookAt(eye[0], eye[1], eye[2], X, Y, Z, 0, 1, 0);
-	}
-	
-	if (changeCam == 2) {
-		float y;
-		if(changed == true) 
-			temp->getPosition(&eye[0]);
-		else {
-			if(newIndex == 0) {
-				graph[0]->getPosition(&eye[0]);
-				y = graph[0]->rotMatrix[1];
-				eye[0] += 1;
-				eye[1] += 1.8;
-				eye[2] += .4;
-			}
-			else if(newIndex == 1) {
-				graph[1]->getPosition(&eye[0]);
-				eye[0] += .5;
-				eye[1] += .9;
-				eye[2] += .2;
-			}
-			else {
-				graph[1]->edges[0]->getPosition(&eye[0]);
-				//eye[0] += .3;
-				eye[1] += .3;
-				//eye[2] += .13;
-			}	
-			multMatrix(&eye[0], rotmat);
-		}		
-		gluLookAt(eye[0], eye[1], eye[2], 1+X, 0+Y, 0+Z, 0, 1, 0);
-	}  
-	
-	//cout<<eye[0]<<" "<<eye[1]<<" "<<eye[2]<<endl;
+void Scene::setCamera(float *rotmat) {	
+	eye[0] = 0 + X; 
+	eye[1] = 0 + Y;
+	eye[2] = .1 + Z;
+	eye[3] = 1;
+	multMatrix(&eye[0], rotmat);
+	gluLookAt(eye[0], eye[1], eye[2], X, Y, Z, 0, 1, 0);
 }

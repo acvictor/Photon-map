@@ -2,136 +2,133 @@
 #include "GL/freeglut.h"
 #include "GL/gl.h"
 #include <GL/glu.h>
+#include "photonMap.h"
+#define DIFFUSE 0
+#define SPECULAR 1
+#define REFRACT 2
+#define NOT_INTERSECTED (1.0e6)
+#define nPhotons 500000
+#define mP 3000000
+
 
 using namespace std;
 
-class Vertex {
-	public:
-		float x, y, z, r, s;
-		Vertex() {
-			x = y = z = r = s = 0;
-		}
-		Vertex(float a, float b, float c) {
-			x = a;
-			y = b;
-			z = c;
-			r = s = 0;
-		}
+enum Axis {xAxis = 0, yAxis = 1, zAxis = 2};
+
+class PhotonRay;
+
+/*
+ * Sphere defines the sphericals objects in the scene
+ * Identified by a center (x, y, z) and radius
+ * Spheres are assumed to be specular
+ */
+class Spheres {
+public:
+	Vec3 center, color;
+	float radius;
+	int opticalProp;
+	Spheres() {
+		radius = 0;
+	}
+	Spheres(float a, float b, float c, float r, int t) {
+		center.x = a; center.y = b; center.z = c;
+		radius = r;
+		opticalProp = t;
+		color = Vec3(1, 1, 1);
+	}
+	float sIntersect(Vec3, Vec3);
+	Vec3 sNormal(Vec3);
 };
 
-class Face {	
-	public:
-		vector<Vertex*> vertices;
-		float normal[3];
-		Face() {
-			normal[0] = normal[1] = normal[2] = 0;
-		};
+/* Plane defines the wall of the box
+ * {xAxis, 2} implies plane at x = 2
+ * Planes are assumed to be diffused 
+ * with diffuse component kd of .5
+ */
+class Planes {
+public:
+	enum Axis axis;
+	Vec3 color;
+	float distanceFromO;
+	int opticalProp;
+	Planes(enum Axis a, float d, float r, float g, float b) {
+		axis = a;
+		distanceFromO = d;
+		color.x = r; color.y = g; color.z = b;
+		opticalProp = 0;
+	}
+	float pIntersect(Vec3, Vec3);
+	Vec3 pNormal(Vec3, PhotonRay);
 };
 
-class Model {
-	public:
-		char text[20];
-		vector<Face*> faces;	
-		GLuint tex;
-		bool nflag;
-		int time, angle, speed;
-		float left, right, top, bottom, near, far, size, scale, dist;
-		float mx, my, mz;
-		int width, height;
-		unsigned char *image;
-		void computeTexSphere();
-		void readTexture(char*);
-		Model();
-		Model(char*);
-		virtual void setDirection(GLfloat *pos);
-		virtual void nextPosition(float *transm, float *rotm, float* zoom);
-		void read(char*);
-		void print();
-		void setNormals();
-		void setTexture();
-		virtual void render();	
-		void drawBox();
+/* 
+ * stores indices of intersected objects
+ */
+class ObjectIntersection {
+public:
+	int index, type;
+	float dist;
+	ObjectIntersection() {
+		dist = NOT_INTERSECTED;
+		index = -1;
+		type = -1;
+	}
 };
 
-class Light: public Model{
-	public:
-		Light();
-		void render();
-		void setDirection(GLfloat *pos);
-		void nextPosition(float *transm, float *rotsm, float* scle);
+
+/*
+ * Origin and direction of ray
+ */
+class PhotonRay {
+public:
+	Vec3 origin;	
+	Vec3 direction; 
+	float color[3];
+	PhotonRay(){
+		origin = Vec3();
+		direction = Vec3();
+	}
+	PhotonRay(Vec3 o) {
+		origin = o;
+		direction = Vec3();
+	}
+	void randDir(float);
+	void specularReflect(Vec3, Vec3);
+	void refract(Vec3, Vec3, float&);
+	void pureDiffuse(Vec3, Vec3);
+	ObjectIntersection* tracePhotonRay(vector<Spheres*>, vector<Planes*>);
 };
 
-class Sun: public Model{
-	public:
-		Sun(char*);
-		void render();
-		void nextPosition(float *transm, float *rotsm, float* scle);
-};
-	
-class Planet: public Model{
-	public:
-		Planet(char*);
-		void render();
-		void nextPosition(float *transm, float *rotsm, float* scle);
+class Light {
+public:
+	const int numPhotons = nPhotons;
+	Vec3 pos;
+	float power;
+	float color[3];
+	Light(Vec3 a, float x) {
+		pos = a;
+		power = x;
+	}
 };
 
-class Moon: public Model{
+class Scene {
 	public:
-		Moon(char*);
-		void render();
-		void nextPosition(float *transm, float *rotsm, float* scle);
-};
-
-class Spaceship: public Model{
-	public:
-		Spaceship(char*);
-		void render();
-		void nextPosition(float *transm, float *rotsm, float* scle);
-};
-
-class SceneGraphNode {
-	public:
-		Model* object;
-		vector <SceneGraphNode*> edges;
-		float transMatrix[3];
-		float rotMatrix[3];
-		float scale;
-		SceneGraphNode(Model*);
-		SceneGraphNode(Model*, float*);
-		SceneGraphNode* getNode(int i);
-		void appendModelNode(SceneGraphNode* sm);
-		void drawNodeList();
-		void addTexture(char *tex);
-		void getPosition(GLfloat *pos);
-		void drawModel();
-		void setTransitions();
-};
-
-class SceneGraph {
-	public:
-		vector<int> lights;
-		vector<SceneGraphNode*> graph;
 		float eye[4];
 		float transmat[6];
-		int oldIndex, newIndex, tind;
-		bool normalColour, lighting, changed, bounding, mode;
+		bool viewMap, empty;
 		float X, Y, Z;
-		int time, changecam;
-		void addModel(SceneGraphNode* sg);
+		int pCol, pRow, pIteration, res;
+		int time;
+		Light *light;
+		// One map for diffuse reflection, one for other interactions
+		PhotonMap *map, *globalMap;
+		vector<Spheres*> spheres;
+		vector<Planes*> planes;
+		Scene();
 		void init();
-		void drawSkyBack(GLuint*);
-		void drawSkyLeft(GLuint*);
-		void drawSkyRight(GLuint*);
-		SceneGraph() {
-			X = Y = Z = 0.0;
-			eye[0] = eye[1] = eye[2] = 0;
-			oldIndex = 0; newIndex = 0; tind = -1;
-			normalColour = changed = mode = false;
-			bounding = true;
-			lighting = true;
-		}
+		void close();
 		void render();
+		void castPhotons();
 		void drawScene();
-		void updateScene();
-		void setCamera(float*, int);
+		void setCamera(float*);
 };	

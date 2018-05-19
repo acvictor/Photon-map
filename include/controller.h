@@ -7,50 +7,28 @@
 
 using namespace std;
 
-class Vec {
-	public:
-		float x, y, z, a;
-		Vec(float c, float d, float e, float f) {
-			x = c;
-			y = d;
-			z = e;
-			a = f;
-		}
-};
-
 class Controller {
 	public:
-		int currentX, currentY, mState, change; 
+		int currentX, currentY, mState; 
 		float Position[3];
 		float data[3];
-		bool headl, s1, s2;
 		Trackball trackball;
-		SceneGraph *model;
-		void bindTextures();
+		Scene *model;
 		void render(int);
 		void display(GLuint*);
-		void lighting();
-		void mode();
+		void moveLightLeft();
+		void moveLightRight();
+		void moveLightIn();
+		void moveLightOut();
+		void moveLightUp();
+		void moveLightDown();
+		void reset();		
 		void run();
-		void drawFloor();
-		void headLight();
-		void bounding();
-		void spot1();
-		void spot2();
-		void pick();
+		void close();
 		void zoomIn();
 		void zoomOut();
-		void light();
-		void decreaseEarth();
-		void increaseEarth();
-		void increaseSun();
-		void decreaseSun();
 		void moveX(float);
 		void moveY(float);
 		void rotate(float, float, float, float);
-		Controller() {
-			currentX = currentY = mState=-1;
-			headl = s1 = s2 = true;
-			change = 0;
-		}
+		Controller();
 };

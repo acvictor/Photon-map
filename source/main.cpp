@@ -6,12 +6,12 @@
 
 using namespace std;
 
-SceneGraph* View::model;
+Scene* View::model;
 Controller* View::controller;
 
 int main(int argc, char* argv[]) {
 	View view;
-	SceneGraph scene;
+	Scene scene;
 	Controller controller;
 	controller.model = &scene;
 	View::model = &scene;

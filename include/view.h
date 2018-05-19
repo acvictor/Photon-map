@@ -9,10 +9,11 @@ using namespace std;
 
 class View {
 	public:
-		static SceneGraph * model;
+		static Scene * model;
 		static GLuint tex[3];
 		static Controller * controller;
 		static void init(int, char**);
+		static void onTimer(int);
 		static void myinit();
 		static void drawAxis();
 		static void display();
