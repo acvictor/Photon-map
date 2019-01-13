@@ -26,8 +26,3 @@ Usage
 External Libraries
 ==================
  * Fast Trackball
-
-Future Work
-===========
- * Integrate with a ray tracer
-
